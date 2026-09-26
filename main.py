@@ -210,6 +210,16 @@ def main():
     parser_name.add_argument("--cli", action="store_true", help="Executar no modo terminal/linha de comando (sem GUI)")
     parser_name.add_argument("--crops-dir", default=DEFAULT_CROPS_DIR, help=f"Diretório para salvar recortes faciais (Padrão: {DEFAULT_CROPS_DIR})")
 
+    # Subcomando: review-people / merge-people
+    parser_review_people = subparsers.add_parser(
+        "review-people",
+        aliases=["merge-people", "similar-people"],
+        help="Revisar e unificar pessoas com base em similaridade facial biométrica"
+    )
+    parser_review_people.add_argument("--db", default=DEFAULT_DB_PATH, help="Caminho do banco SQLite")
+    parser_review_people.add_argument("--threshold", type=float, default=0.35, help="Limiar de similaridade biométrica (padrão: 0.35)")
+    parser_review_people.add_argument("--cli", action="store_true", help="Executar no modo terminal/linha de comando (sem GUI)")
+
     # Subcomando: view / viewer / photo-viewer
     parser_view = subparsers.add_parser(
         "view",
@@ -323,6 +333,22 @@ def main():
             )
     elif args.command in ("name-people", "rename", "identify"):
         start_interactive_namer(db_path=args.db, cli=args.cli)
+    elif args.command in ("review-people", "merge-people", "similar-people"):
+        from face_identity_review import run_cli_similar_people_review
+        from interactive_namer import SimilarPeopleReviewGUI
+        if args.cli:
+            run_cli_similar_people_review(db_path=args.db, min_similarity=args.threshold)
+        else:
+            try:
+                import tkinter as tk
+                root = tk.Tk()
+                root.withdraw()
+                gui = SimilarPeopleReviewGUI(db_path=args.db, parent_root=root)
+                gui.root.protocol("WM_DELETE_WINDOW", root.destroy)
+                root.mainloop()
+            except Exception as e:
+                logger.warning(f"Não foi possível iniciar a interface gráfica ({e}). Iniciando modo CLI...")
+                run_cli_similar_people_review(db_path=args.db, min_similarity=args.threshold)
     elif args.command in ("view", "viewer", "photo-viewer", "foto", "fotos"):
         if args.cli:
             run_cli_photo_viewer(db_path=args.db, filter_person=args.person)

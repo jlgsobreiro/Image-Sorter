@@ -66,8 +66,35 @@ class FaceIdentityMatcher:
         self._detector = detector
         self._recognizer = recognizer
 
+    def _validate_face_geometry(self, face, width: int, height: int, scale: float = 1.0) -> bool:
+        """Valida se o vetor facial de 15 dimensões do YuNet é consistente."""
+        np = self._np
+        if face.shape != (15,) or not np.isfinite(face).all():
+            return False
+        x, y, w, h = face[:4]
+        if face[14] < 0.80 or min(w, h) < 32 * scale:
+            return False
+        if min(x + w, width) - max(x, 0) < 32 * scale:
+            return False
+        if min(y + h, height) - max(y, 0) < 32 * scale:
+            return False
+        landmarks = face[4:14].reshape(5, 2)
+        if (landmarks[:, 0] < max(0, x)).any() or (landmarks[:, 0] >= min(width, x + w)).any():
+            return False
+        if (landmarks[:, 1] < max(0, y)).any() or (landmarks[:, 1] >= min(height, y + h)).any():
+            return False
+        eye_vector = landmarks[1] - landmarks[0]
+        mouth_vector = landmarks[4] - landmarks[3]
+        if np.linalg.norm(eye_vector) < 0.08 * w or np.linalg.norm(mouth_vector) < 0.08 * w:
+            return False
+        eyes = landmarks[:2].mean(axis=0)
+        mouth = landmarks[3:].mean(axis=0)
+        if mouth[1] - eyes[1] < 0.08 * h or not eyes[1] < landmarks[2, 1] < mouth[1]:
+            return False
+        return True
+
     def _embedding(self, crop):
-        if not isinstance(crop, Image.Image) or min(crop.size) < 40:
+        if not isinstance(crop, Image.Image) or min(crop.size) < 32:
             return None
         cv2, np = self._cv2, self._np
         try:
@@ -79,37 +106,40 @@ class FaceIdentityMatcher:
         if scale < 1:
             bgr = cv2.resize(bgr, (round(width * scale), round(height * scale)))
         height, width = bgr.shape[:2]
-        if min(height, width) < 32:
+        if min(height, width) < 24:
             return None
+
+        face = None
+        source_img = bgr
+
         try:
+            # 1. Tentativa padrão de detecção direta
             self._detector.setInputSize((width, height))
             _, faces = self._detector.detect(bgr)
-            if faces is None or len(faces) != 1:
+            if faces is not None and len(faces) == 1:
+                cand = np.asarray(faces[0], dtype=np.float32)
+                if self._validate_face_geometry(cand, width, height, scale):
+                    face = cand
+                    source_img = bgr
+
+            # 2. Tentativa com padding adaptativo de contexto (para recortes justos)
+            if face is None and min(height, width) >= 32:
+                pad_y = max(16, int(height * 0.25))
+                pad_x = max(16, int(width * 0.25))
+                padded = cv2.copyMakeBorder(bgr, pad_y, pad_y, pad_x, pad_x, cv2.BORDER_REFLECT_101)
+                p_h, p_w = padded.shape[:2]
+                self._detector.setInputSize((p_w, p_h))
+                _, p_faces = self._detector.detect(padded)
+                if p_faces is not None and len(p_faces) == 1:
+                    cand = np.asarray(p_faces[0], dtype=np.float32)
+                    if self._validate_face_geometry(cand, p_w, p_h, scale):
+                        face = cand
+                        source_img = padded
+
+            if face is None:
                 return None
-            face = np.asarray(faces[0], dtype=np.float32)
-            if face.shape != (15,) or not np.isfinite(face).all():
-                return None
-            x, y, w, h = face[:4]
-            if face[14] < 0.85 or min(w, h) < 40 * scale:
-                return None
-            if min(x + w, width) - max(x, 0) < 40 * scale:
-                return None
-            if min(y + h, height) - max(y, 0) < 40 * scale:
-                return None
-            landmarks = face[4:14].reshape(5, 2)
-            if (landmarks[:, 0] < max(0, x)).any() or (landmarks[:, 0] >= min(width, x + w)).any():
-                return None
-            if (landmarks[:, 1] < max(0, y)).any() or (landmarks[:, 1] >= min(height, y + h)).any():
-                return None
-            eye_vector = landmarks[1] - landmarks[0]
-            mouth_vector = landmarks[4] - landmarks[3]
-            if np.linalg.norm(eye_vector) < 0.1 * w or np.linalg.norm(mouth_vector) < 0.1 * w:
-                return None
-            eyes = landmarks[:2].mean(axis=0)
-            mouth = landmarks[3:].mean(axis=0)
-            if mouth[1] - eyes[1] < 0.1 * h or not eyes[1] < landmarks[2, 1] < mouth[1]:
-                return None
-            aligned = self._recognizer.alignCrop(bgr, face)
+
+            aligned = self._recognizer.alignCrop(source_img, face)
             feature = np.asarray(self._recognizer.feature(aligned), dtype=np.float64).reshape(-1)
         except Exception as exc:
             raise RuntimeError(f"Falha na inferência local YuNet/SFace: {exc}") from exc
@@ -181,3 +211,13 @@ class FaceIdentityMatcher:
                 status = "matched"
             return {"person_label": label if status == "matched" else None,
                     "status": status, "score": score}
+
+    def compare_people(self, first_person: dict, second_person: dict) -> float | None:
+        """Retorna a similaridade cosseno entre recortes de duas pessoas cadastradas."""
+        with self._lock:
+            self._load_models()
+            first = self._reference_embedding(first_person.get("face_crop_path"))
+            second = self._reference_embedding(second_person.get("face_crop_path"))
+            if first is None or second is None:
+                return None
+            return float(self._np.clip(self._np.dot(first, second), -1.0, 1.0))

@@ -270,15 +270,30 @@ def run_interactive_cli(db_path: str = DEFAULT_DB_PATH):
                 start_live_evaluator_gui(db_path=db_path)
 
         elif choice == "3":
-            print("\nEscolha a interface para nomeação de pessoas:")
-            print(" [1] Janela Gráfica (GUI Tkinter com visualização do rosto) [Recomendado]")
-            print(" [2] Modo Terminal (CLI)")
+            print("\nEscolha a interface para gerenciamento e nomeação de pessoas:")
+            print(" [1] Janela Gráfica Geral (GUI Tkinter com visualização do rosto) [Recomendado]")
+            print(" [2] Revisão Facial Biométrica de Pessoas Semelhantes (Sugestões de Merge)")
+            print(" [3] Modo Terminal (CLI)")
             try:
-                sub_c = input("Opção [1/2, Padrão: 1]: ").strip()
+                sub_c = input("Opção [1/2/3, Padrão: 1]: ").strip()
             except (EOFError, KeyboardInterrupt):
                 continue
-            use_cli = (sub_c == "2")
-            start_interactive_namer(db_path=db_path, cli=use_cli)
+            if sub_c == "2":
+                from face_identity_review import run_cli_similar_people_review
+                from interactive_namer import SimilarPeopleReviewGUI
+                try:
+                    import tkinter as tk
+                    root = tk.Tk()
+                    root.withdraw()
+                    gui = SimilarPeopleReviewGUI(db_path=db_path, parent_root=root)
+                    gui.root.protocol("WM_DELETE_WINDOW", root.destroy)
+                    root.mainloop()
+                except Exception:
+                    run_cli_similar_people_review(db_path=db_path)
+            elif sub_c == "3":
+                start_interactive_namer(db_path=db_path, cli=True)
+            else:
+                start_interactive_namer(db_path=db_path, cli=False)
 
         elif choice == "4":
             print("\nEscolha o modo do visualizador de fotos:")

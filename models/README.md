@@ -22,6 +22,17 @@ O arquivo acompanha o projeto. Não há download nem envio de imagens pela rede 
 
 Reconhecimento inteiramente local, sem download em runtime. `FaceIdentityMatcher` valida os dois modelos no primeiro `match`, alinha pelos cinco landmarks YuNet e compara embeddings SFace normalizados por cosseno. Os padrões conservadores são limiar 0,5 e margem 0,1 entre rótulos distintos; não constituem garantia de identidade. Recortes pequenos, sem rosto único ou com landmarks inadequados não são identificados. Referências ausentes ou inválidas são ignoradas, portanto `new` indica apenas ausência de correspondência visual utilizável. Não há adaptação automática de templates nem comparação por descrição.
 
+### Revisão e unificação de pessoas com biometria facial aprimorada
+
+No módulo `face_identity_review.py` e nas interfaces (`main.py review-people`, `name-people` ou painel gráfico):
+- **Extração Biométrica Adaptativa**: O extrator `FaceIdentityMatcher` utiliza padding de contexto adaptativo (`BORDER_REFLECT_101`) para recuperar enquadramentos justos e extrair landmarks faciais e embeddings SFace com alta precisão geométrica.
+- **Detecção de Co-ocorrência em Fotos**: Analisa o histórico de fotos cadastradas. Caso duas pessoas apareçam simultaneamente no mesmo enquadramento, o sistema alerta o usuário ou permite filtrar o par, prevenindo falsas unificações de pessoas distintas que foram fotografadas juntas.
+- **Classificação em Níveis de Confiança**:
+  - `🟢 Alta (≥ 0.65)`: Forte probabilidade de ser a mesma pessoa com variações naturais de iluminação ou ângulo.
+  - `🟡 Média (0.45 - 0.65)`: Semelhança visual considerável para inspeção manual.
+  - `⚪ Possível (0.35 - 0.45)`: Sugestão para desempate ou casos de baixa resolução.
+- **Interfaces GUI e CLI**: Suporte a filtragem dinâmica por limiar, visualização de recortes lado a lado, contagem de fotos associadas e unificação segura mantendo o histórico de imagens. A similaridade é uma sugestão de apoio e nenhum cadastro é mesclado sem confirmação do usuário.
+
 ### Fast Local Image Classifier (Fotos vs Prints vs Ícones)
 
 - **Módulo**: `image_classifier.py` (`FastImageClassifier`).
